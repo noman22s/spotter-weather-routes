@@ -50,8 +50,8 @@ def find_routes(origin, destination, want=3):
         total = base["cum_miles"][-1]
         mid, _ = interpolate(base["points"], base["cum_miles"], total / 2)
         heading = bearing(*o, *d)
-        vias = [offset(mid[0], mid[1], heading + turn, max(12.0, min(90.0, total * frac)))
-                for frac in (0.12, 0.22) for turn in (90, -90)]
+        vias = [offset(mid[0], mid[1], heading + turn, max(10.0, min(90.0, total * frac)))
+                for frac in (0.12, 0.22, 0.35) for turn in (90, -90)]
 
         def via_route(v):
             try:
@@ -59,14 +59,17 @@ def find_routes(origin, destination, want=3):
             except external.ExternalError:
                 return None
 
-        with ThreadPoolExecutor(max_workers=4) as ex:
+        with ThreadPoolExecutor(max_workers=6) as ex:
             candidates = list(ex.map(via_route, vias))
         candidates = sorted((c for c in candidates if c), key=lambda r: r["duration_hours"])
-        for alt in candidates:
-            if len(kept) >= want:
-                break
-            if alt["duration_hours"] <= base["duration_hours"] * 1.7 and _is_new(alt, kept):
-                kept.append(alt)
+        # strict pass first (clearly different, not much slower); relax for short trips
+        # where every road shares most of the main highway
+        for max_overlap, max_slower in ((0.75, 1.7), (0.9, 2.0)):
+            for alt in candidates:
+                if len(kept) >= want:
+                    break
+                if alt["duration_hours"] <= base["duration_hours"] * max_slower and _is_new(alt, kept, max_overlap):
+                    kept.append(alt)
     kept.sort(key=lambda r: r["duration_hours"])
     return kept[:want]
 
@@ -132,22 +135,28 @@ def _clean(values):
     return [0.0 if v is None else float(v) for v in values]
 
 
-def weather_at(s, when):
-    """Weather at an instant, linearly interpolated between the hourly values."""
+NO_SCENARIO = {"wind_mph": 0.0, "rain_in": 0.0, "snow_in": 0.0}
+
+
+def weather_at(s, when, scenario=None):
+    """Weather at an instant, linearly interpolated between the hourly values. A scenario
+    (what-if offsets) is added on top of the forecast so the rules can be exercised."""
+    sc = scenario or NO_SCENARIO
     h = (when - s["t0"]).total_seconds() / 3600.0
     idx = min(range(len(s["hours"])), key=lambda i: abs(s["hours"][i] - h)) if s["hours"] else 0
     return {
-        "wind_mph": interpolate_value(s["hours"], s["wind"], h),
-        "gust_mph": interpolate_value(s["hours"], s["gust"], h),
-        "rain_in": interpolate_value(s["hours"], s["rain"], h),
-        "snow_in": interpolate_value(s["hours"], s["snow"], h),
+        "wind_mph": interpolate_value(s["hours"], s["wind"], h) + sc["wind_mph"],
+        "gust_mph": interpolate_value(s["hours"], s["gust"], h) + sc["wind_mph"],
+        "rain_in": interpolate_value(s["hours"], s["rain"], h) + sc["rain_in"],
+        "snow_in": interpolate_value(s["hours"], s["snow"], h) + sc["snow_in"],
         "temp_f": interpolate_value(s["hours"], s["temp"], h) * 9 / 5 + 32,
         "condition": WEATHER_CODES.get(s["code"][idx] if s["code"] else None, ""),
     }
 
 
 # ---------------------------------------------------------------------------------- plan
-def plan(origin_q, destination_q, departure_local, load_lbs, interval_miles, with_heatmap=True):
+def plan(origin_q, destination_q, departure_local, load_lbs, interval_miles, with_heatmap=True, scenario=None):
+    scenario = scenario or NO_SCENARIO
     timing = {}
     t = datetime.now()
     with ThreadPoolExecutor(max_workers=2) as ex:
@@ -185,12 +194,12 @@ def plan(origin_q, destination_q, departure_local, load_lbs, interval_miles, wit
     t = datetime.now()
     assessed = []
     for i, (r, cps) in enumerate(zip(routes, checkpoints)):
-        assessed.append(_assess(r, cps, series, load_lbs, tz, i))
+        assessed.append(_assess(r, cps, series, load_lbs, tz, i, scenario))
     order = sorted(range(len(assessed)), key=lambda i: _rank_key(assessed[i]["summary"]))
     for rank, i in enumerate(order, 1):
         assessed[i]["rank"] = rank
         assessed[i]["recommended"] = rank == 1
-    heat = _heatmap(keys, series, departure_utc, load_lbs) if with_heatmap else None   # every forecast cell, checkpoints included
+    heat = _heatmap(keys, series, departure_utc, load_lbs, scenario) if with_heatmap else None   # every forecast cell, checkpoints included
     timing["assess_ms"] = _ms(t)
 
     return {
@@ -201,6 +210,7 @@ def plan(origin_q, destination_q, departure_local, load_lbs, interval_miles, wit
         "timezone": tz_name,
         "load_lbs": load_lbs,
         "interval_miles": interval_miles,
+        "scenario": {**scenario, "active": any(v > 0 for v in scenario.values())},
         "routes": assessed,
         "heatmap": heat,
         "recommendation": _explain(assessed[order[0]], [assessed[i] for i in order[1:]]),
@@ -213,14 +223,14 @@ def plan(origin_q, destination_q, departure_local, load_lbs, interval_miles, wit
     }
 
 
-def _assess(route, cps, series, load_lbs, tz, index):
+def _assess(route, cps, series, load_lbs, tz, index, scenario=None):
     total = route["cum_miles"][-1]
     miles_by_level = [0.0] * 5
     weighted = 0.0
     out_cps = []
     worst = None
     for i, c in enumerate(cps):
-        w = weather_at(series[_key(c["lat"], c["lon"])], c["eta_utc"])
+        w = weather_at(series[_key(c["lat"], c["lon"])], c["eta_utc"], scenario)
         level, driver = risk.classify(w["wind_mph"], w["rain_in"], w["snow_in"], load_lbs)
         # each checkpoint owns the stretch halfway to its neighbours
         start = 0.0 if i == 0 else (cps[i - 1]["mile"] + c["mile"]) / 2
@@ -289,14 +299,14 @@ def _explain(best, others):
             f"{s['severe_miles']} Severe and {s['high_miles']} High miles. {tail[0].upper() + tail[1:]}.")
 
 
-def _heatmap(keys, series, departure_utc, load_lbs):
+def _heatmap(keys, series, departure_utc, load_lbs, scenario=None):
     hours = CFG["HEATMAP_HOURS"]
     levels = []
     for h in range(hours + 1):
         when = departure_utc + timedelta(hours=h)
         row = []
         for k in keys:
-            w = weather_at(series[k], when)
+            w = weather_at(series[k], when, scenario)
             row.append(risk.classify(w["wind_mph"], w["rain_in"], w["snow_in"], load_lbs)[0])
         levels.append(row)
     return {"points": [[k[0], k[1]] for k in keys], "hours": hours, "levels": levels}

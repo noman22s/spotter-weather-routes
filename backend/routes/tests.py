@@ -93,6 +93,9 @@ class PlannerTests(SimpleTestCase):
         s = {"t0": t0, "hours": [0, 1, 2], "wind": [10, 30, 50], "gust": [0, 0, 0], "rain": [0, 0, 0],
              "snow": [0, 0, 0], "temp": [20, 20, 20], "code": [0, 0, 0]}
         self.assertAlmostEqual(planner.weather_at(s, t0 + timedelta(minutes=90))["wind_mph"], 40)
+        windy = planner.weather_at(s, t0 + timedelta(minutes=90), {"wind_mph": 20, "rain_in": 0.3, "snow_in": 0})
+        self.assertAlmostEqual(windy["wind_mph"], 60)
+        self.assertAlmostEqual(windy["rain_in"], 0.3)
 
 
 class ApiTests(SimpleTestCase):

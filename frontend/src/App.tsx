@@ -25,6 +25,9 @@ export default function App() {
     departure: tomorrowAt8(),
     load_lbs: 35000,
     interval_miles: 25,
+    wind_offset_mph: 0,
+    rain_offset_in: 0,
+    snow_offset_in: 0,
   })
   const [result, setResult] = useState<PlanResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -93,6 +96,14 @@ export default function App() {
               <div className={`banner ${tone}`}>
                 <b>Recommended: {best?.name}</b>
                 {result.recommendation}
+                {result.scenario.active && (
+                  <div className="scenario-note">
+                    Scenario applied on top of the forecast:
+                    {result.scenario.wind_mph > 0 && ` +${result.scenario.wind_mph} mph wind`}
+                    {result.scenario.rain_in > 0 && ` +${result.scenario.rain_in} in/h rain`}
+                    {result.scenario.snow_in > 0 && ` +${result.scenario.snow_in} in/h snow`}
+                  </div>
+                )}
               </div>
               <div className="cards">
                 {result.routes.map((r) => (

@@ -58,6 +58,15 @@ button { cursor: pointer; }
 .primary:disabled { opacity: .6; cursor: progress; }
 .error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; padding: 9px 11px; border-radius: 8px; font-size: 13px; }
 .hint { color: var(--muted); font-size: 12px; margin: -4px 0 0; }
+.linkish { border: 0; background: none; padding: 0; text-align: left; font-size: 12.5px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.linkish:hover { color: var(--ink); }
+.badge { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; background: #fef3c7; color: #92400e; }
+.scenario { display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--line); border-radius: 8px; background: #fafbfc; }
+.scenario .hint { margin: 0; }
+.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.row3 label { display: grid; gap: 3px; font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.row3 input { width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.scenario-note { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,.08); font-size: 12px; }
 
 /* results */
 .results { padding: 14px 18px 24px; display: grid; gap: 12px; }

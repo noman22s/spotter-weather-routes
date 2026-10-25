@@ -16,6 +16,10 @@ class PlanSerializer(serializers.Serializer):
     load_lbs = serializers.IntegerField(min_value=0, max_value=200000)
     interval_miles = serializers.ChoiceField(choices=[10, 25, 50], default=25)
     heatmap = serializers.BooleanField(default=True)
+    # optional what-if scenario: added to the forecast everywhere before the rules apply
+    wind_offset_mph = serializers.FloatField(min_value=0, max_value=80, default=0)
+    rain_offset_in = serializers.FloatField(min_value=0, max_value=3, default=0)
+    snow_offset_in = serializers.FloatField(min_value=0, max_value=5, default=0)
 
     def validate_departure(self, value):
         naive = value.replace(tzinfo=None)
@@ -35,8 +39,9 @@ class PlanView(APIView):
             return Response({"errors": s.errors}, status=status.HTTP_400_BAD_REQUEST)
         p = s.validated_data
         try:
+            scenario = {"wind_mph": p["wind_offset_mph"], "rain_in": p["rain_offset_in"], "snow_in": p["snow_offset_in"]}
             body = planner.plan(p["origin"], p["destination"], p["departure"], p["load_lbs"],
-                                int(p["interval_miles"]), p["heatmap"])
+                                int(p["interval_miles"]), p["heatmap"], scenario)
         except external.ExternalError as e:
             code = status.HTTP_502_BAD_GATEWAY if "failed" in str(e) else status.HTTP_404_NOT_FOUND
             return Response({"error": str(e)}, status=code)

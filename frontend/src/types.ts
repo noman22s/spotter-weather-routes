@@ -64,6 +64,7 @@ export interface PlanResult {
   timezone: string
   load_lbs: number
   interval_miles: number
+  scenario: { wind_mph: number; rain_in: number; snow_in: number; active: boolean }
   routes: RouteResult[]
   heatmap: Heatmap | null
   recommendation: string
@@ -77,6 +78,9 @@ export interface PlanRequest {
   departure: string
   load_lbs: number
   interval_miles: 10 | 25 | 50
+  wind_offset_mph: number
+  rain_offset_in: number
+  snow_offset_in: number
 }
 
 export interface Suggestion {
