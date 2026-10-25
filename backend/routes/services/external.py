@@ -37,12 +37,14 @@ _session = requests.Session()
 _session.headers.update(UA)
 
 
-def _get(url, params, timeout=None):
+def _get(url, params, timeout=None, stats=None):
     import time
     try:
         for wait in (0, 3, 8):                        # Open-Meteo's per-minute limit: back off and retry
             if wait:
                 time.sleep(wait)
+                if stats is not None:
+                    stats["retries"] = stats.get("retries", 0) + 1
             r = _session.get(url, params=params, timeout=timeout or CFG["HTTP_TIMEOUT"])
             if r.status_code != 429:
                 break
@@ -158,13 +160,13 @@ def osrm_routes(coords, alternatives=True):
 HOURLY = "temperature_2m,wind_speed_10m,wind_gusts_10m,rain,snowfall,weather_code"
 
 
-def _weather_chunk(points, start_hour, end_hour):
+def _weather_chunk(points, start_hour, end_hour, stats=None):
     data = _get(CFG["WEATHER_URL"], {
         "latitude": ",".join(f"{lat:.4f}" for lat, _ in points),
         "longitude": ",".join(f"{lon:.4f}" for _, lon in points),
         "hourly": HOURLY, "wind_speed_unit": "mph", "precipitation_unit": "inch", "timezone": "UTC",
         "start_hour": start_hour, "end_hour": end_hour,
-    }, timeout=45)
+    }, timeout=45, stats=stats)
     if isinstance(data, dict):
         data = [data]
     out = []
@@ -186,17 +188,20 @@ def _weather_chunk(points, start_hour, end_hour):
     return out
 
 
-def weather_for(points, start_hour, end_hour):
+def weather_for(points, start_hour, end_hour, stats=None):
     """Hourly weather for many points in a few parallel batched calls.
-    start_hour/end_hour: 'YYYY-MM-DDTHH:00' in UTC. Returns a list aligned with `points`."""
+    start_hour/end_hour: 'YYYY-MM-DDTHH:00' in UTC. Returns a list aligned with `points`.
+    `stats` (a dict) collects the number of rate-limit retries and cache hits."""
     key = _ckey("wx", json.dumps([points, start_hour, end_hour]))
     hit = cache.get(key)
     if hit:
+        if stats is not None:
+            stats["cached"] = True
         return hit
     size = CFG["WEATHER_BATCH_SIZE"]
     chunks = [points[i:i + size] for i in range(0, len(points), size)]
     with ThreadPoolExecutor(max_workers=CFG["WEATHER_PARALLEL"]) as ex:
-        results = list(ex.map(lambda c: _weather_chunk(c, start_hour, end_hour), chunks))
+        results = list(ex.map(lambda c: _weather_chunk(c, start_hour, end_hour, stats), chunks))
     out = [loc for chunk in results for loc in chunk]
     cache.set(key, out, CFG["WEATHER_CACHE_SECONDS"])
     return out

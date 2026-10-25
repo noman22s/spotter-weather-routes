@@ -113,16 +113,17 @@ def heatmap_points(routes, step_miles=20.0, side_miles=(12.0,), side_every=40.0,
 
 
 def _key(lat, lon):
-    """Forecast cell: points within about 3 miles share one forecast (the weather models
-    themselves are coarser than that), so overlapping routes cost nothing extra."""
-    return (round(lat * 20) / 20, round(lon * 20) / 20)
+    """Forecast cell of 0.1 degree (about 7 miles): points inside one cell share a forecast.
+    The weather models behind the forecast are 3 to 25 km grids, so nothing is lost, and
+    the overlapping parts of the three routes cost nothing extra against the API quota."""
+    return (round(lat * 10) / 10, round(lon * 10) / 10)
 
 
 # -------------------------------------------------------------------------------- weather
-def fetch_weather(unique_keys, departure_utc, end_utc):
+def fetch_weather(unique_keys, departure_utc, end_utc, stats=None):
     start = departure_utc.replace(minute=0, second=0, microsecond=0)
     points = [(k[0], k[1]) for k in unique_keys]
-    data = external.weather_for(points, start.strftime("%Y-%m-%dT%H:00"), end_utc.strftime("%Y-%m-%dT%H:00"))
+    data = external.weather_for(points, start.strftime("%Y-%m-%dT%H:00"), end_utc.strftime("%Y-%m-%dT%H:00"), stats)
     series = {}
     for k, loc in zip(unique_keys, data):
         times = [datetime.strptime(t, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc) for t in loc["time"]]
@@ -189,8 +190,11 @@ def plan(origin_q, destination_q, departure_local, load_lbs, interval_miles, wit
             keys.append(k)
     longest = max(r["duration_hours"] for r in routes)
     end_utc = departure_utc + timedelta(hours=max(longest, CFG["HEATMAP_HOURS"]) + 2)
-    series = fetch_weather(keys, departure_utc, end_utc)
+    stats = {}
+    series = fetch_weather(keys, departure_utc, end_utc, stats)
     timing["weather_ms"] = _ms(t)
+    timing["weather_retries"] = stats.get("retries", 0)
+    timing["weather_cached"] = bool(stats.get("cached"))
 
     t = datetime.now()
     assessed = []
