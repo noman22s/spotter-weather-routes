@@ -68,6 +68,7 @@ export default function PlanForm({ value, onChange, onSubmit, loading, error }: 
             </div>
             <div className="chips">
               <button type="button" onClick={() => onChange({ ...value, wind_offset_mph: 0, rain_offset_in: 0, snow_offset_in: 0 })}>Forecast only</button>
+              <button type="button" onClick={() => onChange({ ...value, wind_offset_mph: 20, rain_offset_in: 0, snow_offset_in: 0 })}>Windy +20</button>
               <button type="button" onClick={() => onChange({ ...value, wind_offset_mph: 30, rain_offset_in: 0, snow_offset_in: 0 })}>Windy +30</button>
               <button type="button" onClick={() => onChange({ ...value, wind_offset_mph: 0, rain_offset_in: 0.4, snow_offset_in: 0 })}>Heavy rain</button>
               <button type="button" onClick={() => onChange({ ...value, wind_offset_mph: 40, rain_offset_in: 0, snow_offset_in: 1.5 })}>Blizzard</button>
