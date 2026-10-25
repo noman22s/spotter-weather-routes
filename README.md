@@ -8,7 +8,7 @@ shows everything on a map with a 0 to 48 hour corridor risk heatmap.
 
 Built for the Spotter AI full-stack assessment.
 
-**Live:** see the link in the submission. **Stack:** Django 6 + Django REST Framework,
+**Live:** https://spotter-weather-routes.vercel.app **Stack:** Django 6 + Django REST Framework,
 React 19 + TypeScript + Vite, Leaflet. Routing by OSRM, weather by Open-Meteo, geocoding by
 Open-Meteo's place index and Nominatim. All free, no API keys.
 
