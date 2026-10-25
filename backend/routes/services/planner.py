@@ -62,9 +62,10 @@ def find_routes(origin, destination, want=3):
         with ThreadPoolExecutor(max_workers=6) as ex:
             candidates = list(ex.map(via_route, vias))
         candidates = sorted((c for c in candidates if c), key=lambda r: r["duration_hours"])
-        # strict pass first (clearly different, not much slower); relax for short trips
-        # where every road shares most of the main highway
-        for max_overlap, max_slower in ((0.75, 1.7), (0.9, 2.0)):
+        # strict pass first (clearly different, not much slower); relax for trips with one
+        # obvious highway (e.g. Reno to Sacramento over Donner Pass), where the only other
+        # roads are much longer but are exactly what matters when the pass closes
+        for max_overlap, max_slower in ((0.75, 1.7), (0.9, 2.5)):
             for alt in candidates:
                 if len(kept) >= want:
                     break
