@@ -14,6 +14,7 @@ export interface Layers {
 interface Props {
   result: PlanResult | null
   selected: number
+  hovered: number | null
   onSelect: (id: number) => void
   layers: Layers
   hour: number
@@ -28,7 +29,7 @@ function FitBounds({ result }: { result: PlanResult | null }) {
   useEffect(() => {
     if (!result) return
     const all = result.routes.flatMap((r) => r.geometry)
-    map.fitBounds(L.latLngBounds(all), { padding: [40, 40], animate: true })
+    map.fitBounds(L.latLngBounds(all), { padding: [60, 60], animate: true })
   }, [map, result])
   return null
 }
@@ -52,39 +53,81 @@ function CheckpointPopup({ c, routeName }: { c: Checkpoint; routeName: string })
           <tr><td>Wind</td><td>{c.wind_mph} mph, gusts {c.gust_mph}</td></tr>
           <tr><td>Rain</td><td>{c.rain_in} in/h</td></tr>
           <tr><td>Snow</td><td>{c.snow_in} in/h</td></tr>
-          <tr><td>Driver</td><td>{c.driver}</td></tr>
+          <tr><td>Rule</td><td>{c.driver}</td></tr>
         </tbody>
       </table>
     </div>
   )
 }
 
-function RouteLayer({ route, isSelected, dim, showCheckpoints, onSelect, focus, onFocus }: {
-  route: RouteResult; isSelected: boolean; dim: boolean; showCheckpoints: boolean
+/** Split a route's geometry into stretches owned by each checkpoint (halfway to the
+ *  neighbours), so the selected route can be drawn in its risk colours. */
+function riskSegments(route: RouteResult): { positions: [number, number][]; level: number }[] {
+  const geo = route.geometry
+  if (geo.length < 2 || route.checkpoints.length === 0) return [{ positions: geo, level: 0 }]
+  // cumulative distance along the simplified geometry, scaled to the route's miles
+  const cum: number[] = [0]
+  for (let i = 1; i < geo.length; i++) {
+    const [a, b] = [geo[i - 1], geo[i]]
+    const dx = (b[1] - a[1]) * Math.cos(((a[0] + b[0]) / 2) * Math.PI / 180)
+    const dy = b[0] - a[0]
+    cum.push(cum[i - 1] + Math.sqrt(dx * dx + dy * dy))
+  }
+  const scale = route.summary.distance_miles / (cum[cum.length - 1] || 1)
+  const cps = route.checkpoints
+  const bounds = cps.map((c, i) => (i === cps.length - 1 ? Infinity : (c.mile + cps[i + 1].mile) / 2))
+  const out: { positions: [number, number][]; level: number }[] = []
+  let k = 0
+  let current: [number, number][] = [geo[0]]
+  for (let i = 1; i < geo.length; i++) {
+    const mile = cum[i] * scale
+    while (k < bounds.length - 1 && mile > bounds[k]) {
+      current.push(geo[i])
+      out.push({ positions: current, level: cps[k].level })
+      current = [geo[i]]
+      k++
+    }
+    current.push(geo[i])
+  }
+  out.push({ positions: current, level: cps[Math.min(k, cps.length - 1)].level })
+  return out
+}
+
+function RouteLayer({ route, isSelected, isHovered, dim, showCheckpoints, onSelect, focus, onFocus }: {
+  route: RouteResult; isSelected: boolean; isHovered: boolean; dim: boolean; showCheckpoints: boolean
   onSelect: () => void; focus: Checkpoint | null; onFocus: (c: Checkpoint | null) => void
 }) {
   const color = ROUTE_COLORS[route.id % ROUTE_COLORS.length]
-  // on unselected routes only the dangerous checkpoints are drawn, to keep the map readable
+  const segments = useMemo(() => (isSelected ? riskSegments(route) : []), [route, isSelected])
   const cps = useMemo(() => (isSelected ? route.checkpoints : route.checkpoints.filter((c) => c.level >= 3)), [route, isSelected])
+  const tip = `${route.name} · ${Math.round(route.summary.distance_miles)} mi · worst ${route.summary.max_level_name}`
   return (
     <>
-      <Polyline
-        positions={route.geometry}
-        pathOptions={{ color: '#fff', weight: isSelected ? 9 : 6, opacity: dim ? 0 : 0.9 }}
-        interactive={false}
-      />
-      <Polyline
-        positions={route.geometry}
-        pathOptions={{ color, weight: isSelected ? 5 : 3.5, opacity: dim ? 0 : isSelected ? 1 : 0.6, dashArray: isSelected ? undefined : '1 0' }}
-        eventHandlers={{ click: onSelect }}
-      >
-        <Tooltip sticky>{route.name} · {Math.round(route.summary.distance_miles)} mi · worst {route.summary.max_level_name}</Tooltip>
-      </Polyline>
+      {/* white casing */}
+      <Polyline positions={route.geometry} pathOptions={{ color: '#fff', weight: isSelected ? 11 : 7, opacity: dim ? 0 : 0.95 }} interactive={false} />
+      {isSelected ? (
+        <>
+          <Polyline positions={route.geometry} pathOptions={{ color, weight: 7, opacity: 1 }} eventHandlers={{ click: onSelect }}>
+            <Tooltip sticky>{tip}</Tooltip>
+          </Polyline>
+          {segments.map((s, i) => (
+            <Polyline key={i} positions={s.positions} pathOptions={{ color: levelColor(s.level as 0), weight: 4, opacity: 1, lineCap: 'butt' }} interactive={false} />
+          ))}
+        </>
+      ) : (
+        <Polyline
+          positions={route.geometry}
+          pathOptions={{ color, weight: isHovered ? 6 : 4, opacity: dim ? 0 : isHovered ? 1 : 0.55 }}
+          eventHandlers={{ click: onSelect }}
+        >
+          <Tooltip sticky>{tip}</Tooltip>
+        </Polyline>
+      )}
       {showCheckpoints && !dim && cps.map((c) => (
         <CircleMarker
           key={c.mile}
           center={[c.lat, c.lon]}
-          radius={isSelected ? (c.level >= 2 ? 7 : 5) : 6}
+          radius={isSelected ? (c.level >= 2 ? 7 : 4.5) : 6}
           pathOptions={{ color: '#fff', weight: 1.5, fillColor: levelColor(c.level), fillOpacity: 1 }}
           eventHandlers={{ click: () => { onSelect(); onFocus(c) } }}
         >
@@ -100,7 +143,6 @@ function RouteLayer({ route, isSelected, dim, showCheckpoints, onSelect, focus, 
 }
 
 function OpenFocusPopup({ focus }: { focus: Checkpoint | null }) {
-  // Popups open on mount; make sure the focused marker's popup is shown after a list click
   const map = useMap()
   useEffect(() => {
     if (!focus) return
@@ -114,7 +156,7 @@ function OpenFocusPopup({ focus }: { focus: Checkpoint | null }) {
   return null
 }
 
-export default function MapView({ result, selected, onSelect, layers, hour, focus, onFocus }: Props) {
+export default function MapView({ result, selected, hovered, onSelect, layers, hour, focus, onFocus }: Props) {
   const ordered = useMemo(() => {
     if (!result) return []
     return [...result.routes].sort((a, b) => (a.id === selected ? 1 : b.id === selected ? -1 : 0)) // selected drawn last (on top)
@@ -136,6 +178,7 @@ export default function MapView({ result, selected, onSelect, layers, hour, focu
           key={r.id}
           route={r}
           isSelected={r.id === selected}
+          isHovered={r.id === hovered}
           dim={!layers.allRoutes && r.id !== selected}
           showCheckpoints={layers.checkpoints}
           onSelect={() => onSelect(r.id)}
@@ -145,10 +188,10 @@ export default function MapView({ result, selected, onSelect, layers, hour, focu
       ))}
       {result && (
         <>
-          <CircleMarker center={[result.origin.lat, result.origin.lon]} radius={7} pathOptions={{ color: '#0f172a', weight: 2, fillColor: '#fff', fillOpacity: 1 }}>
+          <CircleMarker center={[result.origin.lat, result.origin.lon]} radius={7} pathOptions={{ color: '#0f172a', weight: 2.5, fillColor: '#fff', fillOpacity: 1 }}>
             <Tooltip permanent direction="auto" offset={[8, 0]}>Origin · {result.origin.label}</Tooltip>
           </CircleMarker>
-          <CircleMarker center={[result.destination.lat, result.destination.lon]} radius={7} pathOptions={{ color: '#0f172a', weight: 2, fillColor: '#0f172a', fillOpacity: 1 }}>
+          <CircleMarker center={[result.destination.lat, result.destination.lon]} radius={7} pathOptions={{ color: '#0f172a', weight: 2.5, fillColor: '#0f172a', fillOpacity: 1 }}>
             <Tooltip permanent direction="auto" offset={[8, 0]}>Destination · {result.destination.label}</Tooltip>
           </CircleMarker>
         </>
