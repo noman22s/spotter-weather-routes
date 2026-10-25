@@ -110,7 +110,7 @@ class ApiTests(SimpleTestCase):
         find_routes.return_value = [a, b]
         t0 = datetime(2026, 10, 27, 13, 0, tzinfo=timezone.utc)
 
-        def weather(keys, dep, end):
+        def weather(keys, dep, end, stats=None):
             out = {}
             for k in keys:
                 windy = k[1] > -86.2            # the eastern detour is in a gale
